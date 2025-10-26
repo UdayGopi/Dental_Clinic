@@ -1,0 +1,17 @@
+# Core dependencies
+fastapi==0.104.1
+uvicorn==0.23.2
+python-dotenv==1.0.0
+
+# Database
+sqlalchemy==2.0.23
+sqlite3==0.0.1
+
+# Messaging
+twilio==8.10.0
+
+# Scheduling
+apscheduler==3.10.1
+
+# Templates
+jinja2==3.1.2
