@@ -1,8 +1,2 @@
 Next features:
-
-Charts and graphs for analytics
-Calendar view for appointments
-Export functionality (PDF, CSV)
-Advanced filters
-Real-time updates with WebSocket
-Image uploads for patient profiles
+Add if you have any custom
