@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dental Clinic - Patient Messaging System</title>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Fallback content if React doesn't load -->
+      <div style="padding: 40px; text-align: center; font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+        <h1 style="font-size: 48px; margin-bottom: 20px;">🦷 Dental Clinic System</h1>
+        <p style="font-size: 24px; margin-bottom: 30px;">Loading application...</p>
+        <p style="font-size: 16px; opacity: 0.8;">If this message stays, check browser console (F12)</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Fallback check
+      setTimeout(function() {
+        const root = document.getElementById('root');
+        if (root && root.children.length === 1 && root.children[0].tagName === 'DIV' && root.children[0].textContent.includes('Loading application')) {
+          console.error('⚠️ React did not load! Check console for errors.');
+          root.innerHTML = '<div style="padding: 40px; text-align: center; font-family: Arial;"><h1 style="color: red;">⚠️ Application Failed to Load</h1><p>Please check browser console (F12) for errors.</p><p>Make sure the development server is running.</p></div>';
+        }
+      }, 3000);
+    </script>
+  </body>
+</html>
+

@@ -2,16 +2,32 @@
 fastapi==0.104.1
 uvicorn==0.23.2
 python-dotenv==1.0.0
+pydantic==2.5.0
 
 # Database
 sqlalchemy==2.0.23
-sqlite3==0.0.1
+psycopg2-binary==2.9.9  # PostgreSQL adapter
+alembic==1.12.1  # Database migrations
 
-# Messaging
+# Messaging - Twilio
 twilio==8.10.0
 
 # Scheduling
 apscheduler==3.10.1
+celery==5.3.4  # Distributed task queue for scalability
+
+# Caching & Performance
+redis==5.0.1  # Redis for caching and Celery broker
+hiredis==2.2.3  # Fast Redis client
+
+# Rate Limiting
+slowapi==0.1.9  # Rate limiting middleware
 
 # Templates
 jinja2==3.1.2
+
+# HTTP requests (for testing)
+requests==2.31.0
+
+# Date utilities
+python-dateutil==2.8.2

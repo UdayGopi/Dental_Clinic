@@ -5,8 +5,9 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Appointment, Message, MessageType, MessageStatus, MessageTemplate, ReminderStage
+from app.models import Appointment, Message, MessageType, MessageStatus, MessageTemplate, ReminderStage, Broadcast
 from app.services.messaging import MessagingService
+from app.services.broadcast import broadcast_service
 from app.config import config
 
 # Set up logging
@@ -23,7 +24,7 @@ class AppointmentScheduler:
         # Schedule jobs
         self.scheduler.add_job(
             self.process_pending_messages,
-            CronTrigger(minute='*/15'),  # Run every 15 minutes
+            CronTrigger(minute='*/1'),  # Run every 15 minutes
             id='process_pending_messages'
         )
         
@@ -33,15 +34,25 @@ class AppointmentScheduler:
             id='create_recall_reminders'
         )
         
+        self.scheduler.add_job(
+            self.process_scheduled_broadcasts,
+            CronTrigger(minute='*/30'),  # Run every 30 minutes
+            id='process_scheduled_broadcasts'
+        )
+        
         # Start the scheduler
         self.scheduler.start()
         logger.info("Scheduler started")
     
-    def process_pending_messages(self):
-        """Process all pending messages"""
+    def process_pending_messages(self, force_immediate=False):
+        """Process all pending messages
+        
+        Args:
+            force_immediate: If True, process all pending messages regardless of scheduled_for date
+        """
         db = SessionLocal()
         try:
-            count = self.messaging_service.process_pending_messages(db)
+            count = self.messaging_service.process_pending_messages(db, force_immediate=force_immediate)
             logger.info(f"Processed {count} pending messages")
         except Exception as e:
             logger.error(f"Error processing pending messages: {str(e)}")
@@ -63,6 +74,18 @@ class AppointmentScheduler:
                 ReminderStage.HOURS_BEFORE: appointment.appointment_date - timedelta(hours=config.REMINDER_HOURS_BEFORE)
             }
             
+            # Ensure patient relationship is loaded
+            db.refresh(appointment, ['patient'])
+            
+            # Get patient details explicitly
+            patient = appointment.patient
+            if not patient:
+                logger.error(f"Patient not found for appointment {appointment.id}")
+                return
+            
+            # Log patient details for verification
+            logger.info(f"Creating reminders for appointment {appointment.id} - Patient: {patient.id} ({patient.first_name} {patient.last_name}), Phone: {patient.phone_number}")
+            
             # Create reminders for each stage
             for stage, scheduled_time in reminder_times.items():
                 # Find stage-specific template or use default
@@ -75,12 +98,15 @@ class AppointmentScheduler:
                     logger.warning(f"No template found for {stage} reminder")
                     continue
                 
-                # Create context for template
+                # Create context for template using patient data
                 context = {
-                    "patient_first_name": appointment.patient.first_name,
-                    "patient_last_name": appointment.patient.last_name,
+                    "patient_first_name": patient.first_name,
+                    "patient_last_name": patient.last_name,
+                    "patient_phone": patient.phone_number,
                     "appointment_date": appointment.appointment_date.strftime("%B %d, %Y"),
-                    "appointment_time": appointment.appointment_date.strftime("%I:%M %p")
+                    "appointment_time": appointment.appointment_date.strftime("%I:%M %p"),
+                    "doctor_name": appointment.doctor_name or "Dr. Smith",  # Default if not set
+                    "appointment_type": appointment.appointment_type or "General Checkup"  # Default if not set
                 }
                 
                 # Render message content
@@ -89,9 +115,9 @@ class AppointmentScheduler:
                     context
                 )
                 
-                # Create message
+                # Create message with explicit patient_id
                 message = Message(
-                    patient_id=appointment.patient_id,
+                    patient_id=patient.id,  # Use explicit patient.id
                     appointment_id=appointment.id,
                     message_type=MessageType.APPOINTMENT_REMINDER,
                     reminder_stage=stage,
@@ -101,6 +127,7 @@ class AppointmentScheduler:
                 )
                 
                 db.add(message)
+                logger.debug(f"Created {stage} reminder for patient {patient.id} scheduled for {scheduled_time}")
             
             db.commit()
             logger.info(f"Created staged reminders for appointment {appointment.id}")
@@ -139,11 +166,26 @@ class AppointmentScheduler:
             # Create reminder messages
             count = 0
             for appointment in due_appointments:
-                # Check if we already sent a recall reminder for this appointment
+                # Check if patient has consent
+                if not appointment.patient.consent_sms:
+                    continue
+                
+                # Check if patient already has a scheduled appointment in the next 30 days
+                future_appointment = db.query(Appointment).filter(
+                    Appointment.patient_id == appointment.patient_id,
+                    Appointment.status == "scheduled",
+                    Appointment.appointment_date >= today,
+                    Appointment.appointment_date <= today + timedelta(days=30)
+                ).first()
+                
+                if future_appointment:
+                    logger.info(f"Patient {appointment.patient_id} already has upcoming appointment, skipping recall")
+                    continue
+                
+                # Check if we already sent a recall for this appointment
                 existing_reminder = db.query(Message).filter(
-                    Message.patient_id == appointment.patient_id,
-                    Message.message_type == MessageType.RECALL,
-                    Message.created_at >= today - timedelta(days=30)  # No reminders in the last 30 days
+                    Message.appointment_id == appointment.id,
+                    Message.message_type == MessageType.RECALL
                 ).first()
                 
                 if existing_reminder:
@@ -165,6 +207,8 @@ class AppointmentScheduler:
                 # Create message
                 message = Message(
                     patient_id=appointment.patient_id,
+                    appointment_id=appointment.id,
+                    template_id=recall_template.id,
                     message_type=MessageType.RECALL,
                     content=message_content,
                     status=MessageStatus.PENDING,
@@ -181,6 +225,32 @@ class AppointmentScheduler:
             logger.error(f"Error creating recall reminders: {str(e)}")
         finally:
             db.close()
+    
+    def process_scheduled_broadcasts(self):
+        """Process scheduled broadcasts that are due"""
+        db = SessionLocal()
+        try:
+            # Find broadcasts that are scheduled and due
+            now = datetime.now()
+            pending_broadcasts = db.query(Broadcast).filter(
+                Broadcast.status == "pending",
+                Broadcast.scheduled_at <= now
+            ).all()
+            
+            for broadcast in pending_broadcasts:
+                logger.info(f"Processing scheduled broadcast {broadcast.id}")
+                broadcast_service.process_broadcast(broadcast.id, db)
+                
+        except Exception as e:
+            logger.error(f"Error processing scheduled broadcasts: {str(e)}")
+        finally:
+            db.close()
+    
+    def shutdown(self):
+        """Shutdown the scheduler"""
+        if self.scheduler.running:
+            self.scheduler.shutdown()
+            logger.info("Scheduler shut down")
 
 # Create scheduler instance
 scheduler = AppointmentScheduler()
